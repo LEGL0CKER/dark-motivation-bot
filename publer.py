@@ -54,13 +54,15 @@ def upload_media(video_path: str, config: dict) -> dict:
         raise RuntimeError(
             f"Publer media upload failed [{resp.status_code}]: {resp.text}"
         )
-    return resp.json()
+    data = resp.json()
+    print(f"   [DEBUG] Media upload response: {data}")
+    return data
 
 
 # ---------------------------------------------------------------------------
 # Job status polling
 # ---------------------------------------------------------------------------
-def poll_job(job_id: str, config: dict, max_wait: int = 60) -> dict:
+def poll_job(job_id: str, config: dict, max_wait: int = 120) -> dict:
     """Poll /job_status/{job_id} until complete or timeout."""
     url = f"{BASE_URL}/job_status/{job_id}"
     headers = _headers(config)
@@ -70,8 +72,16 @@ def poll_job(job_id: str, config: dict, max_wait: int = 60) -> dict:
         if not resp.ok:
             raise RuntimeError(f"Job status check failed [{resp.status_code}]: {resp.text}")
         data = resp.json()
-        status = data.get("data", {}).get("status") or data.get("status")
+        print(f"   [DEBUG] Job status response: {data}")
+        # Handle both wrapped {"data": {...}} and bare {"status": ...} responses
+        inner = data.get("data") or data
+        status = inner.get("status") or inner.get("result", {}).get("status")
         if status in ("complete", "completed"):
+            # Check for failures inside the payload
+            payload = inner.get("payload") or inner.get("result", {}).get("payload") or {}
+            failures = payload.get("failures")
+            if failures:
+                raise RuntimeError(f"Publer job completed with failures: {failures}")
             return data
         if status == "failed":
             raise RuntimeError(f"Publer job failed: {data}")
@@ -143,6 +153,7 @@ def schedule_post(
     headers["Content-Type"] = "application/json"
 
     print(f"   Scheduling post for {scheduled_at} …")
+    print(f"   [DEBUG] Schedule payload: {payload}")
     resp = requests.post(url, headers=headers, json=payload, timeout=30)
 
     if not resp.ok:
@@ -151,6 +162,7 @@ def schedule_post(
         )
 
     result = resp.json()
+    print(f"   [DEBUG] Schedule response: {result}")
 
     # Handle async response (job_id)
     job_id = result.get("job_id")
@@ -158,6 +170,7 @@ def schedule_post(
         print(f"   Waiting for Publer job {job_id} …")
         result = poll_job(job_id, config)
 
+    print(f"   [DEBUG] Final result: {result}")
     return result
 
 

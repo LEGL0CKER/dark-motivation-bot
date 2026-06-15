@@ -2,9 +2,9 @@ name: Dark Motivation Bot
 
 on:
   schedule:
-    - cron: '50 12 * * *'   # 7:50 AM CDT → posts at 8:00 AM Central
-    - cron: '50 16 * * *'   # 11:50 AM CDT → posts at 12:00 PM Central
-    - cron: '50 0 * * *'    # 7:50 PM CDT → posts at 8:00 PM Central
+    - cron: '30 12 * * *'   # 7:30 AM CDT → posts at 8:00 AM Central (30 min buffer)
+    - cron: '30 16 * * *'   # 11:30 AM CDT → posts at 12:00 PM Central (30 min buffer)
+    - cron: '30 0 * * *'    # 7:30 PM CDT → posts at 8:00 PM Central (30 min buffer)
   workflow_dispatch:
     inputs:
       post_time:
@@ -76,9 +76,9 @@ jobs:
             echo "time=${{ github.event.inputs.post_time }}" >> $GITHUB_OUTPUT
           else
             case "${{ github.event.schedule }}" in
-              "50 12 * * *") echo "time=08:00" >> $GITHUB_OUTPUT ;;
-              "50 16 * * *") echo "time=12:00" >> $GITHUB_OUTPUT ;;
-              "50 0 * * *")  echo "time=20:00" >> $GITHUB_OUTPUT ;;
+              "30 12 * * *") echo "time=08:00" >> $GITHUB_OUTPUT ;;
+              "30 16 * * *") echo "time=12:00" >> $GITHUB_OUTPUT ;;
+              "30 0 * * *")  echo "time=20:00" >> $GITHUB_OUTPUT ;;
               *)             echo "time=08:00" >> $GITHUB_OUTPUT ;;
             esac
           fi
