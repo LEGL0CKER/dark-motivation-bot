@@ -1,0 +1,30 @@
+{
+  "_instructions": [
+    "1. Copy this file to config.json",
+    "2. Fill in all YOUR_* values",
+    "3. Run: python get_account_ids.py  to find your Publer account IDs",
+    "4. Drop PermanentMarker.ttf in this folder",
+    "5. Drop your music tracks in the music/ folder",
+    "6. Test with: python run.py --dry-run"
+  ],
+
+  "pexels_api_key":       "YOUR_PEXELS_API_KEY",
+  "publer_api_key":       "YOUR_PUBLER_API_KEY",
+  "publer_workspace_id":  "YOUR_PUBLER_WORKSPACE_ID",
+
+  "tiktok_account_id":    "YOUR_TIKTOK_ACCOUNT_ID",
+  "instagram_account_id": "YOUR_INSTAGRAM_ACCOUNT_ID",
+
+  "music_dir":   "./music",
+  "font_path":   "./PermanentMarker.ttf",
+  "output_dir":  "./output",
+
+  "use_curated_quotes": true,
+
+  "font_size":         82,
+  "words_per_line":     5,
+  "text_color":    "0xFFD700",
+  "music_volume":      0.25,
+  "line_delay":         1.6,
+  "fade_in_duration":   0.7
+}
