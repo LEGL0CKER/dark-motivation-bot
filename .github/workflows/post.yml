@@ -1,0 +1,87 @@
+name: Dark Motivation Bot
+
+on:
+  schedule:
+    - cron: '50 12 * * *'   # 7:50 AM CDT → posts at 8:00 AM Central
+    - cron: '50 16 * * *'   # 11:50 AM CDT → posts at 12:00 PM Central
+    - cron: '50 0 * * *'    # 7:50 PM CDT → posts at 8:00 PM Central
+  workflow_dispatch:
+    inputs:
+      post_time:
+        description: 'Post time in Central (HH:MM)'
+        required: false
+        default: '08:00'
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg
+        run: sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Cache music tracks
+        uses: actions/cache@v4
+        with:
+          path: music/*.mp3
+          key: music-tracks-v2
+
+      - name: Download music tracks
+        run: cd music && python3 download_tracks.py
+
+      - name: Build config.json from secrets
+        env:
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PUBLER_API_KEY: ${{ secrets.PUBLER_API_KEY }}
+          PUBLER_WORKSPACE_ID: ${{ secrets.PUBLER_WORKSPACE_ID }}
+          TIKTOK_ACCOUNT_ID: ${{ secrets.TIKTOK_ACCOUNT_ID }}
+        run: |
+          python3 -c "
+          import json, os
+          config = {
+            'pexels_api_key':      os.environ['PEXELS_API_KEY'],
+            'publer_api_key':      os.environ['PUBLER_API_KEY'],
+            'publer_workspace_id': os.environ['PUBLER_WORKSPACE_ID'],
+            'tiktok_account_id':   os.environ['TIKTOK_ACCOUNT_ID'],
+            'instagram_account_id': '',
+            'music_dir':      './music',
+            'font_path':      './PermanentMarker.ttf',
+            'output_dir':     './output',
+            'use_curated_quotes': True,
+            'words_per_line': 3,
+            'video_duration': 15,
+            'music_volume':   0.25,
+            'text_alpha':     153
+          }
+          with open('config.json', 'w') as f:
+              json.dump(config, f)
+          print('config.json created')
+          "
+
+      - name: Determine post time
+        id: post_time
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "time=${{ github.event.inputs.post_time }}" >> $GITHUB_OUTPUT
+          else
+            case "${{ github.event.schedule }}" in
+              "50 12 * * *") echo "time=08:00" >> $GITHUB_OUTPUT ;;
+              "50 16 * * *") echo "time=12:00" >> $GITHUB_OUTPUT ;;
+              "50 0 * * *")  echo "time=20:00" >> $GITHUB_OUTPUT ;;
+              *)             echo "time=08:00" >> $GITHUB_OUTPUT ;;
+            esac
+          fi
+
+      - name: Run pipeline
+        run: python3 run.py --post-time ${{ steps.post_time.outputs.time }}
