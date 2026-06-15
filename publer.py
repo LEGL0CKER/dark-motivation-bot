@@ -73,15 +73,22 @@ def poll_job(job_id: str, config: dict, max_wait: int = 120) -> dict:
             raise RuntimeError(f"Job status check failed [{resp.status_code}]: {resp.text}")
         data = resp.json()
         print(f"   [DEBUG] Job status response: {data}")
-        # Handle both wrapped {"data": {...}} and bare {"status": ...} responses
-        inner = data.get("data") or data
-        status = inner.get("status") or inner.get("result", {}).get("status")
+        # Publer returns: {"success": true, "data": {"status": "...", "result": {"status": "...", "payload": {"failures": {}}}}}
+        # or sometimes bare: {"status": "..."}
+        data_block  = data.get("data") or data
+        result      = data_block.get("result") or {}
+        # Status can be at data level or result level
+        status = data_block.get("status") or result.get("status")
         if status in ("complete", "completed"):
-            # Check for failures inside the payload
-            payload = inner.get("payload") or inner.get("result", {}).get("payload") or {}
+            # Check for failures at both levels
+            payload  = result.get("payload") or data_block.get("payload") or {}
             failures = payload.get("failures")
             if failures:
                 raise RuntimeError(f"Publer job completed with failures: {failures}")
+            # Also check plan.locked
+            plan = result.get("plan") or {}
+            if plan.get("locked"):
+                raise RuntimeError("Publer workspace is locked — check your plan.")
             return data
         if status == "failed":
             raise RuntimeError(f"Publer job failed: {data}")
@@ -123,6 +130,12 @@ def schedule_post(
                     "type": "video",
                     "text": caption,
                     "media": [media_obj],
+                    "details": {
+                        "privacy": "PUBLIC_TO_EVERYONE",
+                        "comment": True,
+                        "duet": True,
+                        "stitch": True,
+                    },
                 }
             },
             "accounts": [{"id": tiktok_id, "scheduled_at": scheduled_at}],
