@@ -3,9 +3,28 @@ Publer API integration.
   1. Upload video file → get media_id
   2. Schedule post to TikTok and/or Instagram accounts
 """
+import json
+import random
 import time
 import requests
 from pathlib import Path
+
+
+def pick_sound_id(config: dict) -> str | None:
+    """Return a random trending TikTok sound ID from sounds.json, or None."""
+    sounds_path = Path(config.get("sounds_file", "./sounds.json"))
+    if not sounds_path.exists():
+        return None
+    try:
+        with open(sounds_path) as f:
+            sounds = json.load(f)
+        if sounds:
+            chosen = random.choice(sounds)
+            print(f"   🎵  Sound: {chosen.get('name', 'unknown')} (id: {chosen['id']})")
+            return str(chosen["id"])
+    except Exception:
+        pass
+    return None
 
 BASE_URL = "https://app.publer.com/api/v1"
 
@@ -124,20 +143,22 @@ def schedule_post(
     posts = []
 
     if tiktok_id:
-        posts.append({
-            "networks": {
-                "tiktok": {
-                    "type": "video",
-                    "text": caption,
-                    "media": [media_obj],
-                    "details": {
-                        "privacy": "PUBLIC_TO_EVERYONE",
-                        "comment": True,
-                        "duet": True,
-                        "stitch": True,
-                    },
-                }
+        sound_id = pick_sound_id(config)
+        tiktok_network: dict = {
+            "type": "video",
+            "text": caption,
+            "media": [media_obj],
+            "details": {
+                "privacy": "PUBLIC_TO_EVERYONE",
+                "comment": True,
+                "duet": True,
+                "stitch": True,
             },
+        }
+        if sound_id:
+            tiktok_network["soundId"] = sound_id
+        posts.append({
+            "networks": {"tiktok": tiktok_network},
             "accounts": [{"id": tiktok_id, "scheduled_at": scheduled_at}],
         })
 
