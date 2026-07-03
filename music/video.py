@@ -1,9 +1,9 @@
 """
 Video generation pipeline.
-  1. Download a random dark-city background clip from Pexels.
-  2. Pick a random music track from the local music/ folder.
-  3. Render each quote line as a full-canvas RGBA PNG with Permanent Marker font + gold.
-  4. Composite everything with FFmpeg: loop bg, fade-in each line, mix music → 1080×1920 MP4.
+  1. Download a moody dark-city background clip from Pexels.
+  2. Keep audio near-silent — TikTok soundId overlay handles the music.
+  3. Render each phrase of the quote as a separate PNG with Bebas Neue.
+  4. Composite with FFmpeg: phrase-by-phrase reveal → 1080×1920 MP4.
 """
 import os
 import random
@@ -15,7 +15,28 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 
 # ---------------------------------------------------------------------------
-# Mood presets — paired Pexels queries + music filename keywords
+# Font — Bebas Neue (auto-downloaded on first run)
+# ---------------------------------------------------------------------------
+BEBAS_NEUE_PATH = Path(__file__).parent / "BebasNeue-Regular.ttf"
+BEBAS_NEUE_URL  = (
+    "https://github.com/dharmatype/Bebas-Neue/raw/master/"
+    "fonts/BebasNeue(OFL)/TTF/BebasNeue-Regular.ttf"
+)
+
+
+def ensure_font() -> str:
+    """Download Bebas Neue Regular if not present. Returns local path."""
+    if not BEBAS_NEUE_PATH.exists():
+        print("   Downloading Bebas Neue font …")
+        r = requests.get(BEBAS_NEUE_URL, timeout=30)
+        r.raise_for_status()
+        BEBAS_NEUE_PATH.write_bytes(r.content)
+        print(f"   Saved → {BEBAS_NEUE_PATH.name}")
+    return str(BEBAS_NEUE_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Pexels queries — moody night / rain / atmospheric dark vibes
 # ---------------------------------------------------------------------------
 MOOD_PRESETS = {
     "rain": {
@@ -25,6 +46,11 @@ MOOD_PRESETS = {
             "wet street neon night",
             "dark rain city bokeh",
             "rain drops window dark",
+            "cobblestone street night rain",
+            "wet pavement night reflections",
+            "rainy street puddle city night",
+            "dark alley night rain",
+            "rain street lamp night",
         ],
         "music": ["echoes", "cyberpunk", "torn", "vampires", "complicated"],
     },
@@ -35,6 +61,9 @@ MOOD_PRESETS = {
             "city alley night neon",
             "urban street dark night",
             "dark rooftop city night",
+            "night street empty dark",
+            "dark urban walkway night",
+            "empty road night dark",
         ],
         "music": ["thunder", "greed", "lord-knows", "try-me", "trapanomics", "never-going-broke"],
     },
@@ -45,6 +74,8 @@ MOOD_PRESETS = {
             "skyscraper night dark",
             "urban city night lights",
             "night city aerial dark",
+            "dark dramatic sky city",
+            "storm clouds dark city",
         ],
         "music": ["epic", "need-for-speed", "greed", "lord-knows"],
     },
@@ -79,22 +110,17 @@ def download_pexels_video(config: dict, mood: dict | None = None) -> str:
 
     resp = requests.get(
         "https://api.pexels.com/videos/search",
-        headers=headers,
-        params=params,
-        timeout=20,
+        headers=headers, params=params, timeout=20,
     )
     resp.raise_for_status()
     videos = resp.json().get("videos", [])
 
     if not videos:
-        # Fallback: landscape orientation, page 1
         params["orientation"] = "landscape"
         params["page"] = 1
         resp = requests.get(
             "https://api.pexels.com/videos/search",
-            headers=headers,
-            params=params,
-            timeout=20,
+            headers=headers, params=params, timeout=20,
         )
         resp.raise_for_status()
         videos = resp.json().get("videos", [])
@@ -104,8 +130,6 @@ def download_pexels_video(config: dict, mood: dict | None = None) -> str:
 
     video = random.choice(videos)
     files = video.get("video_files", [])
-
-    # Prefer portrait files; pick highest resolution
     portrait = [f for f in files if f.get("height", 0) > f.get("width", 0)]
     pool = portrait if portrait else files
     best = max(pool, key=lambda f: f.get("height", 0) * f.get("width", 0))
@@ -125,16 +149,13 @@ def download_pexels_video(config: dict, mood: dict | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — Pick a music track
+# Step 2 — Pick a music track (kept silent; TikTok soundId handles audio)
 # ---------------------------------------------------------------------------
 def pick_music(config: dict, mood: dict | None = None) -> str:
     """Return path to a mood-matched audio file in the music/ directory."""
     music_dir = Path(config.get("music_dir", "./music"))
     if not music_dir.exists():
-        raise FileNotFoundError(
-            f"Music folder not found: {music_dir}\n"
-            "Create the folder and drop your audio tracks in it."
-        )
+        raise FileNotFoundError(f"Music folder not found: {music_dir}")
 
     extensions = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
     all_tracks = [f for f in music_dir.iterdir() if f.suffix.lower() in extensions]
@@ -144,24 +165,20 @@ def pick_music(config: dict, mood: dict | None = None) -> str:
     if mood:
         keywords = mood["music"]
         matched = [f for f in all_tracks if any(kw in f.stem.lower() for kw in keywords)]
-        tracks = matched if matched else all_tracks  # fall back to any track
+        tracks = matched if matched else all_tracks
     else:
         tracks = all_tracks
 
     chosen = random.choice(tracks)
-    print(f"   Music: {chosen.name}")
+    print(f"   Music: {chosen.name} (muted — TikTok soundId handles audio)")
     return str(chosen)
 
 
 # ---------------------------------------------------------------------------
-# Step 3 — Render text lines as PNGs with Pillow
+# Step 3 — Render phrase PNGs with Bebas Neue
 # ---------------------------------------------------------------------------
 def split_into_lines(text: str, max_words: int = 3, min_lines: int = 3) -> list[str]:
-    """
-    Split quote into visually balanced lines.
-    Finds the line count (between min_lines and 6) that produces the most
-    even word distribution, then merges any single-word last line up.
-    """
+    """Split quote into visually balanced ALL-CAPS lines."""
     text = text.replace("\\n", "\n").upper()
     words = []
     for raw in text.split("\n"):
@@ -170,8 +187,6 @@ def split_into_lines(text: str, max_words: int = 3, min_lines: int = 3) -> list[
         return []
 
     n = len(words)
-
-    # Find line count with most even distribution (smallest remainder)
     best_nl = min_lines
     best_rem = n
     for nl in range(min_lines, min(7, n + 1)):
@@ -185,7 +200,6 @@ def split_into_lines(text: str, max_words: int = 3, min_lines: int = 3) -> list[
 
     base  = n // best_nl
     extra = n % best_nl
-
     lines = []
     i = 0
     for l in range(best_nl):
@@ -201,86 +215,79 @@ def split_into_lines(text: str, max_words: int = 3, min_lines: int = 3) -> list[
     return [l for l in lines if l.strip()]
 
 
-def auto_font_size(num_lines: int, canvas_h: int = 1920, fill_ratio: float = 0.92) -> int:
-    """Calculate font size so all lines fill ~fill_ratio of the canvas height."""
-    line_spacing_ratio = 1.4  # line_spacing = font_size * this
-    available_h = canvas_h * fill_ratio
-    size = int(available_h / (num_lines * line_spacing_ratio))
-    return max(60, min(size, 400))  # clamp between 60 and 400
-
-
-def fit_font_size(
+def _fit_font_for_phrases(
     lines: list[str],
     font_path: str,
     canvas_w: int = 1080,
     canvas_h: int = 1920,
-    start_size: int = 0,
-    max_w_ratio: float = 0.88,   # lines must fit within 88% of canvas width
+    max_w_ratio: float = 0.90,
+    target_h_ratio: float = 0.28,
 ) -> tuple[int, "ImageFont.FreeTypeFont"]:
     """
-    Return (font_size, font) that fills the screen height while keeping every
-    line narrower than canvas_w * max_w_ratio.
+    Find the largest font size where every phrase fits within canvas_w * max_w_ratio.
+    Starts from target_h_ratio of canvas height.
     """
-    from PIL import ImageFont as _IF, ImageDraw as _ID, Image as _IM
-    size = start_size if start_size > 0 else auto_font_size(len(lines), canvas_h)
+    from PIL import Image as _IM, ImageDraw as _ID
+
+    start_size = int(canvas_h * target_h_ratio)
+    start_size = max(80, min(start_size, 500))
+    size = start_size
     max_px = int(canvas_w * max_w_ratio)
 
     while size > 60:
         font = ImageFont.truetype(font_path, size)
-        # Measure widest line
         dummy = _IM.new("RGBA", (1, 1))
         draw  = _ID.Draw(dummy)
         widths = [draw.textbbox((0, 0), l, font=font)[2] for l in lines]
         if max(widths) <= max_px:
             return size, font
-        size -= 4   # shrink until it fits
+        size -= 6
 
     return size, ImageFont.truetype(font_path, size)
 
 
-def render_line_images(
+def render_phrase_pngs(
     lines: list[str],
     font_path: str,
-    font_size: int = 0,       # 0 = auto-size to fill screen
     canvas_w: int = 1080,
     canvas_h: int = 1920,
-    text_alpha: int = 153,    # 0–255; 153 ≈ 60 %
-) -> tuple[list[str], int]:
+) -> list[str]:
     """
-    Render ALL lines onto a single transparent 1080×1920 canvas (static overlay).
-    Font is auto-sized to fill the screen vertically AND fit within canvas width.
-    Returns (list_with_one_png_path, line_spacing_px).
+    Render each phrase as its own centered PNG on a transparent canvas.
+    All phrases use the same font size (fitted to the widest line).
+    Returns list of temp PNG file paths — one per phrase.
     """
-    font_size, font = fit_font_size(lines, font_path, canvas_w, canvas_h, start_size=font_size)
+    font_size, font = _fit_font_for_phrases(lines, font_path, canvas_w, canvas_h)
 
-    line_spacing = int(font_size * 1.5)
-    total_h = len(lines) * line_spacing
-    start_y = (canvas_h - total_h) // 2
+    yellow = (255, 226, 52, 255)   # bright yellow, fully opaque
+    shadow = (0, 0, 0, 210)
+    shadow_offset = max(4, font_size // 16)
 
-    gold   = (255, 215, 0, text_alpha)
-    shadow = (0, 0, 0, min(255, int(text_alpha * 0.9)))
-    shadow_offset = max(3, font_size // 28)
+    pngs = []
+    for line in lines:
+        img  = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
 
-    img  = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-
-    for i, line in enumerate(lines):
         bbox   = draw.textbbox((0, 0), line, font=font)
         text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
         x = (canvas_w - text_w) // 2
-        y = start_y + i * line_spacing
+        y = (canvas_h - text_h) // 2 - bbox[1]  # correct for ascender offset
+
         draw.text((x + shadow_offset, y + shadow_offset), line, font=font, fill=shadow)
-        draw.text((x, y), line, font=font, fill=gold)
+        draw.text((x, y), line, font=font, fill=yellow)
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, prefix="dm_text_")
-    img.save(tmp.name, "PNG")
-    tmp.close()
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, prefix="dm_phrase_")
+        img.save(tmp.name, "PNG")
+        tmp.close()
+        pngs.append(tmp.name)
 
-    return [tmp.name], line_spacing
+    print(f"   Font size: {font_size}px | {len(lines)} phrases")
+    return pngs
 
 
 # ---------------------------------------------------------------------------
-# Step 4 — Composite with FFmpeg
+# Step 4 — Composite with FFmpeg (phrase-by-phrase reveal)
 # ---------------------------------------------------------------------------
 def generate_video(
     quote: str,
@@ -290,63 +297,69 @@ def generate_video(
     config: dict,
 ) -> str:
     """
-    Build the final 1080×1920 MP4:
-      • loops background video
-      • overlays each line with a fade-in, staggered by line_delay seconds
-      • mixes music at reduced volume
+    Build the final 1080×1920 MP4 with phrase-by-phrase text reveal.
+    Each phrase is shown centered for an equal time slice, replacing the previous.
+    Audio is silent — TikTok's soundId provides the music.
     """
-    font_path = str(Path(config.get("font_path", "./PermanentMarker.ttf")).resolve())
-    if not Path(font_path).exists():
-        raise FileNotFoundError(
-            f"Font file not found: {font_path}\n"
-            "Copy PermanentMarker.ttf into the project folder."
-        )
-
-    font_size   = int(config.get("font_size", 0))        # 0 = auto-fill screen
-    music_vol   = float(config.get("music_volume", 0.25))
-    max_words   = int(config.get("words_per_line", 3))
-    text_alpha  = int(config.get("text_alpha", 153))     # 153 ≈ 60 %
-    total_dur   = float(config.get("video_duration", 15.0))
+    font_path  = ensure_font()
+    music_vol  = float(config.get("music_volume", 0.0))  # 0 = silent; TikTok sound handles audio
+    max_words  = int(config.get("words_per_line", 3))
+    total_dur  = float(config.get("video_duration", 15.0))
 
     lines = split_into_lines(quote, max_words=max_words, min_lines=3)
     if not lines:
         raise ValueError("Quote produced no renderable lines.")
 
-    print(f"   Rendering {len(lines)} lines …")
-    png_paths, _ = render_line_images(lines, font_path, font_size, text_alpha=text_alpha)
+    print(f"   Rendering {len(lines)} phrases …")
+    png_paths = render_phrase_pngs(lines, font_path)
 
-    # --- Pick a random start point in the music track ---
+    # Pick a random start point in the music track
     music_start = 0.0
     try:
         probe = subprocess.run(
-            [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                music,
-            ],
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", music],
             capture_output=True, text=True,
         )
-        duration = float(probe.stdout.strip())
-        max_start = max(0.0, duration - total_dur - 2)
+        duration    = float(probe.stdout.strip())
+        max_start   = max(0.0, duration - total_dur - 2)
         music_start = random.uniform(0, max_start) if max_start > 0 else 0.0
         print(f"   Music start: {music_start:.1f}s / {duration:.1f}s")
     except Exception:
-        pass  # if ffprobe fails, start from 0
+        pass
 
-    # --- Build FFmpeg command ---
-    # Static text: one combined PNG overlaid from t=0
+    # Build FFmpeg command
+    # inputs: 0=bg_video, 1=music, 2..N+1=phrase PNGs
     cmd = ["ffmpeg", "-y"]
-    cmd += ["-stream_loop", "-1", "-i", bg_video]                        # input 0
-    cmd += ["-ss", str(music_start), "-i", music]                        # input 1
-    cmd += ["-loop", "1", "-t", str(total_dur), "-i", png_paths[0]]      # input 2
+    cmd += ["-stream_loop", "-1", "-i", bg_video]
+    cmd += ["-ss", str(music_start), "-i", music]
+    for png in png_paths:
+        cmd += ["-loop", "1", "-t", str(total_dur), "-i", png]
 
-    # --- filter_complex: scale bg, overlay static text ---
-    filter_complex = (
+    # filter_complex: slightly darken + desaturate bg, then chain phrase overlays
+    n = len(png_paths)
+    phrase_dur = total_dur / n
+
+    parts = [
         "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,format=yuv420p[base];"
-        "[base][2:v]overlay=0:0[out]"
-    )
+        "crop=1080:1920,"
+        "eq=brightness=-0.12:saturation=0.75,"
+        "format=yuv420p[base]"
+    ]
+
+    current = "base"
+    for i in range(n):
+        t0  = i * phrase_dur
+        t1  = (i + 1) * phrase_dur
+        inp = i + 2              # inputs: 0=bg, 1=music, 2+=pngs
+        nxt = "out" if i == n - 1 else f"v{i}"
+        parts.append(
+            f"[{current}][{inp}:v]overlay=0:0"
+            f":enable='between(t,{t0:.3f},{t1:.3f})'[{nxt}]"
+        )
+        current = nxt
+
+    filter_complex = ";".join(parts)
 
     cmd += [
         "-t", str(total_dur),
@@ -366,7 +379,6 @@ def generate_video(
     print("   Running FFmpeg …")
     result = subprocess.run(cmd, capture_output=True, text=True)
 
-    # Clean up temp PNGs
     for p in png_paths:
         try:
             os.unlink(p)
