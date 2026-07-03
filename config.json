@@ -7,24 +7,19 @@
     "5. Drop your music tracks in the music/ folder",
     "6. Test with: python run.py --dry-run"
   ],
-
-  "pexels_api_key":       "DXJmfrOaEUlXOxTTpEokFXFzk6UBNxzzAhUnI5TEpgkHaYY2zuNgoh46",
-  "publer_api_key":       "4445a54a990bdc89cc91a8e6efc12433c47ef30040e5b313",
-  "publer_workspace_id":  "6a2f802f5b0ab86e905dc809",
-
-  "tiktok_account_id":    "￴￴6a2f8062c1c",
+  "pexels_api_key": "DXJmfrOaEUlXOxTTpEokFXFzk6UBNxzzAhUnI5TEpgkHaYY2zuNgoh46",
+  "publer_api_key": "4445a54a990bdc89cc91a8e6efc12433c47ef30040e5b313",
+  "publer_workspace_id": "6a2f802f5b0ab86e905dc809",
+  "tiktok_account_id": "6a2f8062c1c0a5407f526225",
   "instagram_account_id": "YOUR_INSTAGRAM_ACCOUNT_ID",
-
-  "music_dir":   "./music",
-  "font_path":   "./PermanentMarker.ttf",
-  "output_dir":  "./output",
-
+  "music_dir": "./music",
+  "font_path": "./PermanentMarker.ttf",
+  "output_dir": "./output",
   "use_curated_quotes": true,
-
-  "font_size":         82,
-  "words_per_line":     5,
-  "text_color":    "0xFFD700",
-  "music_volume":      0.25,
-  "line_delay":         1.6,
-  "fade_in_duration":   0.7
+  "font_size": 82,
+  "words_per_line": 5,
+  "text_color": "0xFFD700",
+  "music_volume": 0.25,
+  "line_delay": 1.6,
+  "fade_in_duration": 0.7
 }

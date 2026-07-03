@@ -90,7 +90,7 @@ def main():
     # ---- lazy imports (keep startup fast) ----
     from quotes import get_quote
     from video import download_pexels_video, generate_video, pick_mood, pick_music
-    from publer import upload_and_schedule
+    from tiktok_api import post_video
 
     print("\n🎬  Dark Motivation Bot — starting pipeline\n")
 
@@ -138,11 +138,11 @@ def main():
         print(f"✅  Dry run complete. Video at:\n    {out_file}\n")
         return
 
-    # 5. Schedule via Publer
-    print("📤  Scheduling via Publer …")
-    scheduled_at = next_post_time(args.post_time)
-    upload_and_schedule(str(out_file), quote, scheduled_at, config)
-    print(f"    Scheduled for {scheduled_at}\n")
+    # 5. Post to TikTok
+    print("📤  Posting to TikTok …")
+    sounds_file = BASE_DIR / "sounds.json"
+    post_video(str(out_file), quote, sounds_file=sounds_file if sounds_file.exists() else None)
+    print()
 
     print("✅  Done!\n")
 
