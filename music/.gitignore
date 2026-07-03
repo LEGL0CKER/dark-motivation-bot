@@ -4,3 +4,6 @@ music/*.mp3
 __pycache__/
 *.pyc
 .DS_Store
+music/.tiktok_tokens.json
+output/
+**/__pycache__/
