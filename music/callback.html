@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>TikTok Auth Callback</title>
+  <style>
+    body { background: #000; color: #fff; font-family: monospace; display: flex;
+           flex-direction: column; align-items: center; justify-content: center;
+           height: 100vh; margin: 0; }
+    h1 { color: #ffe234; font-size: 1.2rem; margin-bottom: 1rem; }
+    #code { background: #111; border: 1px solid #ffe234; padding: 1rem 2rem;
+            font-size: 1.4rem; letter-spacing: 0.05em; border-radius: 6px;
+            word-break: break-all; max-width: 90vw; text-align: center; }
+    #msg { margin-top: 1rem; color: #888; font-size: 0.85rem; }
+    #err { color: #f55; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Authorization Code</h1>
+  <div id="code">—</div>
+  <div id="msg"></div>
+  <div id="err"></div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code  = params.get('code');
+    const error = params.get('error');
+    if (code) {
+      document.getElementById('code').textContent = code;
+      document.getElementById('msg').textContent  = 'Copy this code and paste it into your terminal.';
+    } else if (error) {
+      document.getElementById('err').textContent = 'Error: ' + error + ' — ' + (params.get('error_description') || '');
+      document.getElementById('code').textContent = '(no code)';
+    } else {
+      document.getElementById('code').textContent = '(no code in URL)';
+    }
+  </script>
+</body>
+</html>
