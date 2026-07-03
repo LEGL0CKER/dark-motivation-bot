@@ -1,78 +1,60 @@
 #!/usr/bin/env python3
 """
-update_sounds.py — fetch trending TikTok sounds from Creative Center.
+update_sounds.py — scrape sound IDs from trending dark motivation TikTok videos.
 
 Run once a month:
     cd ~/Documents/dark-motivation-bot && python3 update_sounds.py
 
 What it does:
-  1. Opens TikTok Creative Center in a real browser window.
-  2. If you're not logged in, it waits while you log in.
-  3. Intercepts the API response that loads the trending music list.
-  4. Saves the sound IDs to sounds.json and pushes to GitHub.
+  1. Opens TikTok search results for dark motivation / money mindset hashtags.
+  2. Extracts the sound IDs being used by trending videos in your niche.
+  3. Saves to sounds.json and pushes to GitHub.
 """
 
-import json
-import subprocess
-import sys
-import time
+import json, re, subprocess, sys, time
 from pathlib import Path
 
 SOUNDS_FILE = Path(__file__).parent / "sounds.json"
 REPO_DIR    = Path(__file__).parent
 
-CC_URL = (
-    "https://ads.tiktok.com/business/creativecenter/"
-    "inspiration/popular/music/pc/en"
-)
-
-# Keywords that fit the dark motivation / money mindset niche.
-# Sounds whose titles contain any of these are kept; all others still kept
-# but ranked lower (we just dump everything and let run.py pick randomly).
-NICHE_KEYWORDS = [
-    "dark", "trap", "drill", "motivat", "hustle", "grind", "money",
-    "empire", "epic", "cinematic", "power", "rise", "king", "boss",
-    "night", "city", "rain", "cold", "deep", "mystery", "shadow",
+# Hashtags to search — niche + general viral
+SEARCH_TERMS = [
+    # Your niche
+    "darkmotivation",
+    "moneymindset",
+    "motivationquotes",
+    "successmindset",
+    "grindmotivation",
+    # General viral
+    "fyp",
+    "viral",
+    "trending",
+    "foryou",
+    "tiktoktrending",
 ]
 
 
-# ---------------------------------------------------------------------------
-# Auto-install Playwright if missing
-# ---------------------------------------------------------------------------
 def _ensure_playwright():
     try:
         import playwright  # noqa: F401
     except ImportError:
         print("📦  Installing Playwright …")
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "playwright",
-             "--break-system-packages", "-q"],
-            check=True,
-        )
-    # Ensure Chromium binary exists
-    result = subprocess.run(
-        [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        # Already installed is fine
-        pass
-
+        subprocess.run([sys.executable, "-m", "pip", "install", "playwright",
+                        "--break-system-packages", "-q"], check=True)
+    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
+                   capture_output=True)
 
 _ensure_playwright()
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 
-# ---------------------------------------------------------------------------
-# Scrape
-# ---------------------------------------------------------------------------
-def fetch_sounds() -> list[dict]:
-    captured: list[dict] = []
+def scrape_sounds() -> list[dict]:
+    all_sounds: list[dict] = []
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=False, slow_mo=50)
+        browser = pw.chromium.launch(headless=False, slow_mo=30)
         context = browser.new_context(
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": 1280, "height": 900},
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -81,162 +63,150 @@ def fetch_sounds() -> list[dict]:
         )
         page = context.new_page()
 
-        # ── Intercept Creative Center music API responses ──────────────────
-        def handle_response(response):
+        # Intercept TikTok API responses for sound/music data
+        def on_response(response):
             url = response.url
-            if (
-                "creativecenter" in url
-                and ("music" in url or "song" in url or "audio" in url)
-                and response.status == 200
+            if response.status == 200 and "tiktok.com" in url and (
+                "music" in url or "sound" in url or "item_list" in url
+                or "search" in url or "tag" in url
             ):
                 try:
                     body = response.json()
-                    _extract_sounds(body, captured)
+                    _dig(body, all_sounds)
                 except Exception:
                     pass
 
-        page.on("response", handle_response)
+        page.on("response", on_response)
 
-        # ── Navigate ───────────────────────────────────────────────────────
-        print("\n🌐  Opening TikTok Creative Center …")
-        page.goto(CC_URL, wait_until="domcontentloaded", timeout=30_000)
-
-        # Wait to see if login is required
-        time.sleep(4)
-
-        # If redirected to a login page, pause for the user
-        if any(kw in page.url for kw in ("login", "signup", "passport")):
-            print("\n🔐  Please log in to TikTok in the browser window.")
-            print("    Press Enter here once you're logged in …")
-            input()
-            page.goto(CC_URL, wait_until="domcontentloaded", timeout=30_000)
-            time.sleep(4)
-
-        print("⏳  Loading sounds (scrolling page) …")
-
-        # Scroll a few times to trigger more API calls / lazy-load
-        for _ in range(6):
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(1.5)
-
-        # Also try clicking "Load more" buttons if present
-        for selector in ["text=Load more", "text=See more", "[data-e2e='load-more']"]:
-            try:
-                btn = page.locator(selector).first
-                if btn.is_visible():
-                    btn.click()
-                    time.sleep(2)
-            except Exception:
-                pass
-
-        # Give a moment for any final API calls to complete
+        # First: open TikTok and let user log in if needed
+        print("\n🌐  Opening TikTok …")
+        page.goto("https://www.tiktok.com", wait_until="domcontentloaded", timeout=20_000)
         time.sleep(3)
 
-        # ── Fallback: extract from DOM if API interception got nothing ─────
-        if not captured:
-            print("ℹ️   API interception empty — trying DOM extraction …")
-            captured = _dom_extract(page)
+        print("\n" + "="*55)
+        print("  TikTok is open in the browser window.")
+        print("  If you see a login prompt, dismiss it (click X).")
+        print("  You do NOT need to be logged in for this to work.")
+        print("="*55)
+        input("\n  Press Enter when TikTok has loaded ▶ ")
+
+        # Search each hashtag
+        for term in SEARCH_TERMS:
+            url = f"https://www.tiktok.com/tag/{term}"
+            print(f"\n🔍  Scraping #{term} …")
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=20_000)
+                time.sleep(3)
+                # Scroll to load videos
+                for _ in range(4):
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(1.5)
+                # Extract sound links from page
+                _extract_from_page(page, all_sounds)
+            except Exception as e:
+                print(f"   Error on #{term}: {e}")
 
         browser.close()
 
-    return captured
+    return all_sounds
 
 
-def _extract_sounds(body: dict, out: list):
-    """Recursively hunt for sound/music objects in an API response."""
-    if isinstance(body, dict):
-        # Common Creative Center response shapes
-        for key in ("data", "music_list", "list", "items", "result", "music"):
-            if key in body:
-                _extract_sounds(body[key], out)
-        # A leaf node that looks like a sound
-        if "music_id" in body or "song_id" in body or "id" in body:
-            sid = (
-                str(body.get("music_id") or body.get("song_id") or body.get("id", ""))
-            )
-            name = (
-                body.get("music_title")
-                or body.get("song_name")
-                or body.get("title")
-                or body.get("name")
-                or ""
-            )
+def _dig(obj, out: list):
+    """Recursively find music/sound objects in TikTok API responses."""
+    if isinstance(obj, dict):
+        # TikTok API shape: music.id or music.playUrl
+        music = obj.get("music") or obj.get("sound") or {}
+        if isinstance(music, dict):
+            sid  = str(music.get("id") or "")
+            name = str(music.get("title") or music.get("authorName") or "")
             if sid.isdigit() and len(sid) >= 10:
                 if not any(s["id"] == sid for s in out):
-                    out.append({"id": sid, "name": str(name).strip()})
-    elif isinstance(body, list):
-        for item in body:
-            _extract_sounds(item, out)
+                    out.append({"id": sid, "name": name.strip()})
+        # Also check direct id fields
+        sid  = str(obj.get("id") or "")
+        name = str(obj.get("title") or obj.get("name") or "")
+        if sid.isdigit() and len(sid) >= 15 and "title" in obj:
+            if not any(s["id"] == sid for s in out):
+                out.append({"id": sid, "name": name.strip()})
+        for v in obj.values():
+            _dig(v, out)
+    elif isinstance(obj, list):
+        for item in obj:
+            _dig(item, out)
 
 
-def _dom_extract(page) -> list[dict]:
-    """Last-resort: pull music IDs out of anchor hrefs on the page."""
-    sounds = []
+def _extract_from_page(page, out: list):
+    """Extract sound IDs from TikTok video cards on a hashtag page."""
     try:
-        hrefs = page.eval_on_selector_all(
-            "a[href*='/music/']",
-            "els => els.map(e => ({href: e.href, text: e.innerText}))",
-        )
-        for item in hrefs:
-            href = item.get("href", "")
-            # TikTok music URLs end with a numeric ID: /music/title-1234567890
-            parts = href.rstrip("/").split("-")
-            sid = parts[-1].split("?")[0] if parts else ""
-            if sid.isdigit() and len(sid) >= 10:
-                name = item.get("text", "").strip()
-                if not any(s["id"] == sid for s in sounds):
-                    sounds.append({"id": sid, "name": name})
+        # Method 1: look for sound links in page HTML
+        content = page.content()
+        # TikTok sound URLs: /music/title-1234567890123
+        for m in re.finditer(r'/music/[^"\'?\s]+-(\d{10,})', content):
+            sid = m.group(1)
+            if not any(s["id"] == sid for s in out):
+                out.append({"id": sid, "name": ""})
+
+        # Method 2: look for musicId in page data
+        for m in re.finditer(r'"musicId"\s*:\s*"(\d{10,})"', content):
+            sid = m.group(1)
+            if not any(s["id"] == sid for s in out):
+                out.append({"id": sid, "name": ""})
+
+        # Method 3: NEXT_DATA embedded JSON
+        m = re.search(r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', content, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(1))
+                _dig(data, out)
+            except Exception:
+                pass
+
     except Exception as e:
-        print(f"   DOM extract error: {e}")
-    return sounds
+        print(f"   Page extract error: {e}")
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def main():
-    print("🎵  TikTok Trending Sounds Updater")
-    print("=" * 40)
+    print("🎵  TikTok Trending Sounds Updater (niche scraper)")
+    print("=" * 50)
 
-    sounds = fetch_sounds()
+    sounds = scrape_sounds()
+
+    # Deduplicate
+    seen, unique = set(), []
+    for s in sounds:
+        if s["id"] not in seen:
+            seen.add(s["id"])
+            unique.append(s)
+    sounds = unique
 
     if not sounds:
         print("\n❌  No sounds found.")
-        print("   The Creative Center page structure may have changed.")
-        print("   Keeping existing sounds.json unchanged.")
+        print("   TikTok may have changed their page structure.")
         sys.exit(1)
 
-    # Score: niche-relevant sounds first
-    def score(s):
-        name_lower = s["name"].lower()
-        return sum(1 for kw in NICHE_KEYWORDS if kw in name_lower)
+    print(f"\n✅  Found {len(sounds)} sounds:")
+    for s in sounds[:15]:
+        print(f"   {s['name'] or '(no name)':40s}  {s['id']}")
+    if len(sounds) > 15:
+        print(f"   … and {len(sounds) - 15} more")
 
-    sounds.sort(key=score, reverse=True)
-
-    print(f"\n✅  Found {len(sounds)} sounds. Top matches:")
-    for s in sounds[:10]:
-        print(f"   [{score(s)} pts] {s['name']}  (id: {s['id']})")
-
-    # Save
     with open(SOUNDS_FILE, "w") as f:
         json.dump(sounds, f, indent=2, ensure_ascii=False)
     print(f"\n💾  Saved {len(sounds)} sounds → {SOUNDS_FILE.name}")
 
-    # Git push
     try:
         subprocess.run(["git", "add", "sounds.json"], cwd=REPO_DIR, check=True)
-        result = subprocess.run(
+        r = subprocess.run(
             ["git", "commit", "-m", f"Update trending sounds ({len(sounds)} tracks)"],
             cwd=REPO_DIR, capture_output=True, text=True,
         )
-        if "nothing to commit" in result.stdout + result.stderr:
-            print("ℹ️   sounds.json unchanged — nothing to push.")
+        if "nothing to commit" in r.stdout + r.stderr:
+            print("ℹ️   sounds.json unchanged.")
         else:
             subprocess.run(["git", "push"], cwd=REPO_DIR, check=True)
             print("🚀  Pushed to GitHub!")
     except subprocess.CalledProcessError as e:
-        print(f"⚠️   Git error: {e} — sounds.json saved locally but not pushed.")
-        print("    Run `git add sounds.json && git commit -m 'Update sounds' && git push` manually.")
+        print(f"⚠️   Git error: {e}")
 
 
 if __name__ == "__main__":
